@@ -16,7 +16,7 @@ import numpy as np
 print('numpy:{}'.format(np.__version__))
 
 
-
+TRAINING_TIME_LIMIT = 120 * 60
 # 8192 - large enough for demonstration, larger values make network training slower
 MAX_VOCAB_SIZE = 2**13
 # seq2seq generally relies on fixed length message vectors - longer messages provide more info
@@ -262,7 +262,7 @@ from time import strftime, gmtime
 from datetime import timedelta
 
 
-training_time_limit = 120 * 60  # seconds (notebooks terminate after 1 hour)
+training_time_limit = TRAINING_TIME_LIMIT  # seconds (notebooks terminate after 1 hour)
 start_time = time.time()
 stop_after = start_time + training_time_limit
 
