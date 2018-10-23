@@ -53,6 +53,41 @@ class twitterbot:
         self.reverse_vocab = {}
         self.c = config.params()
 
+    def preprocess(self, raw_word):
+        #print(raw_word)
+        l1 = ['won’t','won\'t','wouldn’t','wouldn\'t','’m', '’re', '’ve', '’ll', '’s','’d', 'n’t', '\'m', '\'re', '\'ve', '\'ll', '\'s', '\'d', 'can\'t', 'n\'t']
+        l2 = ['will not','will not','would not','would not',' am', ' are', ' have', ' will', ' is', ' had', ' not', ' am', ' are', ' have', ' will', ' is', ' had', 'can not', ' not']
+        l3 = ['-', '_', ' *', ' /', '* ', '/ ', '\"', ' \\"', '\\ ', '--', '...', '. . .']
+    
+        raw_word = raw_word.lower()
+        raw_word = re.sub(r'\s([?.!:,"](?:\s|$))', r'\1', raw_word).replace('__unk__', '')
+        
+        for j, term in enumerate(l1):
+            raw_word = raw_word.replace(term,l2[j])
+            
+        for term in l3:
+            raw_word = raw_word.replace(term,' ')
+        
+        for j in range(30):
+            raw_word = raw_word.replace('. .', '')
+            raw_word = raw_word.replace('.  .', '')
+            raw_word = raw_word.replace('..', '')
+        
+        for j in range(5):
+            raw_word = raw_word.replace('  ', ' ')
+            
+        #if raw_word[-1] <>  '!' and raw_word[-1] <> '?' and raw_word[-1] <> '.' and raw_word[-2:] <>  '! ' and raw_word[-2:] <> '? ' and raw_word[-2:] <> '. ':
+        #    raw_word = raw_word + ' .'
+        
+        #if raw_word == ' !' or raw_word == ' ?' or raw_word == ' .' or raw_word == ' ! ' or raw_word == ' ? ' or raw_word == ' . ':
+        #    raw_word = 'what ?'
+        
+        #if raw_word == '  .' or raw_word == ' .' or raw_word == '  . ':
+        #    raw_word = 'i do not want to talk about it .'
+        
+        #print(raw_word)
+        return raw_word
+
     def to_word_idx(self, sentence):
         full_length = [self.vocab.get(tok, self.c.UNK) for tok in self.analyzer(
             sentence)] + [self.c.PAD] * self.c.MAX_MESSAGE_LEN
@@ -65,8 +100,8 @@ class twitterbot:
     def read_sqlite_data(self, db_file):
         conn = sqlite3.connect(db_file)
         df = pd.read_sql_query("select * from tweets;", conn)
-        #df.tweet = df.tweet.apply(remove_punctuation)
-        #df.response = df.response.apply(remove_punctuation)
+        df.tweet = df.tweet.apply(self.preprocess)
+        df.response = df.response.apply(self.preprocess)
         
         self.texts = df.tweet
         self.responses = df.response
@@ -93,7 +128,6 @@ class twitterbot:
         joblib.dump(self.vocab, 'vocab.joblib')
 
     def build_vectors(self):
-
         print("Calculating word indexes for X...")
         x = pd.np.vstack(self.texts.apply(self.to_word_idx).values)
         print("Calculating word indexes for Y...")
@@ -188,6 +222,8 @@ class twitterbot:
         return np.array([np_utils.to_categorical(row, num_classes=self.c.MAX_VOCAB_SIZE)
                          for row in labels])
 
+
+
     def respond_to(self, text):
         # Helper function that takes a text input and provides a text output.
         input_y = self.add_start_token(
@@ -197,7 +233,7 @@ class twitterbot:
         for position in range(self.c.MAX_MESSAGE_LEN - 1):
             prediction = self.model.predict([idxs, input_y]).argmax(axis=2)[0]
             input_y[:, position + 1] = prediction[position]
-        return self.from_word_idx(self.model.predict([idxs, input_y]).argmax(axis=2)[0])
+        return self.preprocess(self.from_word_idx(self.model.predict([idxs, input_y]).argmax(axis=2)[0]))
 
     def do_train(self, start_idx, end_idx):
         # Batching seems necessary in Kaggle Jupyter Notebook environments, since
@@ -213,11 +249,12 @@ class twitterbot:
         )
 
         rand_idx = random.sample(list(range(len(self.test_x))), self.c.BATCH_SIZE)
-        print('Test results:', self.model.evaluate(
+        test_results = self.model.evaluate(
             [self.test_x[rand_idx], self.add_start_token(
                 self.test_y[rand_idx])],
             self.binarize_labels(self.test_y[rand_idx])
-        ))
+        )
+        print('Test results:', test_results)
         
         input_strings = [
                 "@AmazonHelp Having a problem with my Kindle",
@@ -225,8 +262,10 @@ class twitterbot:
             ]
             
         for input_string in input_strings:
+            input_string = self.preprocess(input_string)
             output_string = self.respond_to(input_string)
             print('> "{}"\n< "{}"'.format(input_string, output_string))
+        return test_results    
 
         
 
@@ -251,15 +290,31 @@ class twitterbot:
     def train(self, filename):
         # self.read_csv_data(filename)
         self.read_sqlite_data('test.db')
+        num_bad = 3
+        curr_bad = 0
+        curr_score = 15.0
+        tmp_score = 0
         self.build_vocab()
         self.build_vectors()
         self.build_model()
         print('do_train')    
-        for x in range(10):
+        for x in range(30):
             print('epoch {}'.format(x))
             for start_idx in range(0, len(self.train_x), self.c.SUB_BATCH_SIZE):
                 print('start_idx {}'.format(start_idx))    
-                self.do_train(start_idx, start_idx+self.c.SUB_BATCH_SIZE)
+                tmp_score = self.do_train(start_idx, start_idx+self.c.SUB_BATCH_SIZE)
+                if tmp_score < curr_score:
+                    curr_score = tmp_score
+                    curr_bad = 0
+                else:
+                    curr_score = tmp_score
+                    curr_bad += 1
+                    if curr_bad >= num_bad:
+                        break
+            else:
+                continue
+            break
+        
         self.save()
 
     def create_responder(self):
@@ -285,4 +340,4 @@ tb.create_responder()
 
 while True:
     i = input(">")
-    print("< {}".format(tb.respond_to(i)))
+    print("< {}".format(tb.respond_to(tb.preprocess(i))))
