@@ -1,2 +1,3 @@
 *.joblib
 secrets.py
+test.db
